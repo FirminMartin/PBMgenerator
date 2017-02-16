@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <time.h>
 #include <string.h>
-#include <math.h>
 //#define NDEBUG
 #include <assert.h>
 #include <argp.h>
@@ -13,8 +12,9 @@
 const char *argp_program_version = "PBMgenerator 1.0";
 
 struct arguments {
-  char *args[2];            /* arg1=width and arg2=height */
+  char *args[2];            /* arg[1]=width and arg[2]=height */
   int verbose;              /* The -v flag */
+  int number;               /* The -n flag */
   char *outfile;            /* Argument for -o */
   double bp_ratio;            /* Arguments for black pixels ratio*/
 };
@@ -22,7 +22,8 @@ struct arguments {
 static struct argp_option options[] = {
   {"verbose", 'v', 0, 0, "Produce verbose output"},
   {"bpratio", 'r', "bp_ratio", 0, "The black pixels ratio that the image created will have"},
-  {"output",  'o', "OUTFILE", 0,"Output to the file outfile "},
+  {"output",  'o', "filename", 0,"Output to filename.pbm "},
+  {"number", 'n',"number",0, "The number of image requested"},
   {0}
 };
 
@@ -32,8 +33,9 @@ static error_t parse_opt (int key, char *arg, struct argp_state *state) {
 	
   switch (key) {
     case 'v': arguments->verbose = 1; break;
-    case 'r': arguments->bp_ratio = strtod(arg,NULL); break;
+    case 'r': arguments->bp_ratio = strtod(arg,NULL); break; //BUG : when bp_ratio >= 0.999, the image isn't correct
     case 'o': arguments->outfile = arg; break;
+    case 'n': arguments->number = atoi(arg);break;
     case ARGP_KEY_ARG:
       if (state->arg_num >= 2) argp_usage(state);
 	  arguments->args[state->arg_num] = arg;
@@ -67,32 +69,58 @@ typedef struct{
 remains_t remains;
 
 void init_args(struct arguments *args);
-void write_pbm(const char* name, dim_t* dim, double bpixels_ratio);
+void write_pbm(const char* name, dim_t dim, double bpixels_ratio);
 void init_remains(dim_t dim, double bpixels_ratio);
 char random_make_byte(int nb_bit);
 long long sum_first(char arr[], int n);
 void random_make_buffer(char buff[BUFF_LEN], int n);
 int  total_bits(char x);
 
+#define RED   "\x1B[31m"
+#define GRN   "\x1B[32m"
+#define YEL   "\x1B[33m"
+#define BLU   "\x1B[34m"
+#define MAG   "\x1B[35m"
+#define CYN   "\x1B[36m"
+#define WHT   "\x1B[37m"
+#define RESET "\x1B[0m"
+
 int main(int argc, char **argv){
 	struct arguments arguments;
-	init_args(&arguments);
-	argp_parse (&argp, argc, argv, 0, 0, &arguments);
+	double bp_ratio;
+	int i;
+    clock_t start_clock, end_clock;
 
     srand(time(NULL));
-    dim_t dim = {atol(arguments.args[0]), atol(arguments.args[1])};
-
-	if (!dim.width || !dim.height) fprintf(stderr,"Error : dimensions not correct\n");
-
-	double bp_ratio;
-
-	printf("%lf\n",arguments.bp_ratio);
-
-	if (arguments.bp_ratio) bp_ratio = arguments.bp_ratio;
-	else bp_ratio = 0.5;
+	init_args(&arguments);
 	
-	if (arguments.outfile) write_pbm(arguments.outfile, &dim, bp_ratio);
-	else write_pbm("pbm", &dim, bp_ratio);
+    argp_parse (&argp, argc, argv, 0, 0, &arguments);
+    
+    dim_t dim = {atol(arguments.args[0]), atol(arguments.args[1])};
+	if (!dim.width || !dim.height) {
+		fprintf(stderr, RED "Error : dimensions incorrect\n" RESET);
+		exit(-2);
+	}
+
+	bp_ratio = arguments.bp_ratio;
+	if (bp_ratio > 1 || bp_ratio < 0) {
+		fprintf(stderr, RED "Error : black pixels ratio incorrect\n" RESET);
+		exit(-3);
+	}
+
+    if (arguments.number > 0){
+        for(i=0;i<arguments.number;i++)  {
+            if (arguments.verbose) fprintf(stdout,WHT "%3d ... " RESET, i+1);
+            write_pbm(arguments.outfile, dim, bp_ratio);
+            if(arguments.verbose) {
+                if (clock()/CLOCKS_PER_SEC == 0) fprintf(stdout, BLU "done " YEL "%12ld"  BLU " ms\n" RESET, (clock()*1000)/CLOCKS_PER_SEC);
+                else fprintf(stdout, BLU "done " YEL "%5ld" BLU " s" YEL "%5ld" BLU " ms\n", clock()/CLOCKS_PER_SEC, (clock()*1000)/CLOCKS_PER_SEC%1000);
+            }
+        }
+    } else {
+        fprintf(stderr, RED "Error : requested number incorrect\n" RESET);
+        exit(-4);
+    }
     
 	return 0;
 }
@@ -106,7 +134,8 @@ int main(int argc, char **argv){
 void init_args(struct arguments *args){
 	args->outfile = NULL;
 	args->verbose = 0;
-	args->bp_ratio = 0.0;
+	args->bp_ratio = 0.5;
+    args->number = 1;
 }
 
 
@@ -114,10 +143,10 @@ void init_args(struct arguments *args){
 /** 
   * INPUT : the file name, dimension struct and the black pixel ratio
   * OUPUT : NULL
-  * SIDE EFFECTS : create a .pbm image with the giving name, dimension and black pixel ration.
+  * SIDE EFFECTS : create a .pbm image with a giving name, dimensions and black pixel ration.
   *  */
 
-void write_pbm(const char* name, dim_t* dim, double bpixels_ratio){
+void write_pbm(const char* name, dim_t dim, double bpixels_ratio){
     static int file_nb = 0; /** count the request files number to name files*/
     int write_bytes = 0;
     long long remains_bytes=0;
@@ -126,17 +155,20 @@ void write_pbm(const char* name, dim_t* dim, double bpixels_ratio){
     double tmp_local_ratio = 0;
     FILE* fp;
     
-    init_remains(*dim, bpixels_ratio);
-    
-    sprintf(file_name, "%s-%ldx%ld-%.2f_%d.pbm", name,dim->width, dim->height, bpixels_ratio, file_nb);
+    init_remains(dim, bpixels_ratio);
+    if (name != NULL) {
+        if (file_nb == 0) sprintf(file_name, "%s.pbm", name);
+        else sprintf(file_name, "%s_%d.pbm", name, file_nb);
+    }
+	else sprintf(file_name, "%ldx%ld-%.2f_%d.pbm",dim.width, dim.height, bpixels_ratio, file_nb);
+
     fp = fopen(file_name,"wb");
     if(!fp){
         perror("write_pbm() Error ");
         exit(-1);
     }
-   
     /* write header*/
-    sprintf(buff, "P4\n%ld %ld\n", dim->width, dim->height); 
+    sprintf(buff, "P4\n%ld %ld\n", dim.width, dim.height); 
     fwrite(buff, sizeof(char),strlen(buff), fp);
     do{
         /** Calculate exactly the right nb of bytes */
@@ -144,7 +176,7 @@ void write_pbm(const char* name, dim_t* dim, double bpixels_ratio){
         if (remains_bytes == 0) break;
         write_bytes = (remains_bytes > BUFF_LEN) ? BUFF_LEN : remains_bytes;
         random_make_buffer(buff, write_bytes);
-        assert(write_bytes == fwrite(buff, sizeof(char), write_bytes, fp));
+        fwrite(buff, sizeof(char), write_bytes, fp);
         remains.bits -= 8*write_bytes;
 
         tmp_local_ratio = remains.local_ratio;
@@ -167,7 +199,7 @@ void random_make_buffer(char buff[BUFF_LEN], int n){
     assert(BUFF_LEN >= n);
     assert(remains.bits != 0);
     long long tmp_v = 0; 
-    int i , tmp_i = 0;
+    int i, tmp_i = 0;
     long long sum = 0;
     for(i = 0; i < n; i++){ /** randomly init the first n bytes of the buffer */
         buff[i] = rand()%256;
