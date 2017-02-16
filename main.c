@@ -5,16 +5,18 @@
 #include <time.h>
 #include <string.h>
 #include <math.h>
+//#define NDEBUG
+#include <assert.h>
 #define BUFF_LEN 300 //SEGFAULT for -O3
 
 typedef struct{
-    long width;
-    long height;
+    long width;  /** width in pixels (bits) */
+    long height; /** height in pixels (bits) */
 } dim_t;
 
 typedef struct{
     long long bpixels;
-    long long remains_bits;
+    long long bits;
     double local_ratio;
 }remains_t;
 
@@ -23,25 +25,19 @@ remains_t remains;
 void write_pbm(const char* name, dim_t* dim, double bpixels_ratio);
 void init_remains(dim_t dim, double bpixels_ratio);
 char random_make_byte(int nb_bit);
-int sum_first(char arr[], int n);
+long long sum_first(char arr[], int n);
 void print_byte(char x);
-void random_make_sum(char buff[BUFF_LEN], int n);
-int  total_bit(char x)
+void random_make_buffer(char buff[BUFF_LEN], int n);
+int  total_bits(char x);
 
 int main(){
     srand(time(NULL));
     dim_t dim;
     int i;
-    for (i=500;i<=500;i++){
-        printf("%d : ...", i);
-        dim.height = i;
-        dim.width = i+5;
-        write_pbm("tst", &dim, 0.01);
-        printf(" done\n");
-    }
-
-
-    //write_pbm("tst", &dim, 0.05);
+    dim.width = 80;
+    dim.height = 50;
+    printf("start !\n");
+    write_pbm("tst", &dim, 0.01 );
     return 0;
 }
 
@@ -52,40 +48,42 @@ int main(){
   *  */
 
 void write_pbm(const char* name, dim_t* dim, double bpixels_ratio){
-    static int file_nb = 0;
-    int write_bits = 0;
+    static int file_nb = 0; /** count the request files number to name files*/
+    int write_bytes = 0;
     long long remains_bytes=0;
     char buff[BUFF_LEN]={0};
-    char new_name[255]={0};
+    char file_name[255]={0};
     double tmp_local_ratio = 0;
     FILE* fp;
+    
     init_remains(*dim, bpixels_ratio);
-    sprintf(new_name, "%s-%ldx%ld-%.2f_%d.pbm", name,dim->width, dim->height, bpixels_ratio, file_nb);
-    fp = fopen(new_name,"wb");
+    
+    sprintf(file_name, "%s-%ldx%ld-%.2f_%d.pbm", name,dim->width, dim->height, bpixels_ratio, file_nb);
+    fp = fopen(file_name,"wb");
     if(!fp){
         perror("write_pbm() Error ");
         exit(-1);
     }
+   
     /* write header*/
     sprintf(buff, "P4\n%ld %ld\n", dim->width, dim->height);
-    fwrite(buff, nof(char),strlen(buff), fp);
+    fwrite(buff, sizeof(char),strlen(buff), fp);
+printf("init:remains.bits = %lld, remains_bytes = %lld\n",remains.bits, remains_bytes);   
     do{
-        remains_bytes = remains.remains_bits/8;
-        write_bits = (remains_bytes > BUFF_LEN) ? BUFF_LEN : (!remains_bytes ? 1 : remains_bytes);
-
-
-
-        random_make_sum(buff, write_bits);
-
-        remains.remains_bits -= 8*fwrite(buff, nof(char), write_bits, fp);
+printf("before:remains.bits = %lld, remains_bytes = %lld\n",remains.bits, remains_bytes);
+        remains_bytes = (remains.bits <= 0) ? 0 : ((remains.bits % 8 == 0) ? remains.bits/8 : remains.bits/8 + 1);
+        if (remains_bytes == 0) break;
+        write_bytes = (remains_bytes > BUFF_LEN) ? BUFF_LEN : remains_bytes;
+        random_make_buffer(buff, write_bytes);
+        assert(write_bytes == fwrite(buff, sizeof(char), write_bytes, fp));
+        remains.bits -= 8*write_bytes;
 
         tmp_local_ratio = remains.local_ratio;
         if (remains.bpixels == 0) remains.local_ratio = 0;
-        remains.local_ratio = remains.bpixels / (remains.remains_bits + 0.0000000000000000001);
+        remains.local_ratio = remains.bpixels / (remains.bits + 0.0000000000000000001);
         if (remains.local_ratio < tmp_local_ratio) remains.local_ratio *= (0.01*(rand()%5)); //TODO
-
-//system("pause");
-    }while(remains_bytes  > 0);
+printf("after:remains.bits = %lld, remains_bytes = %lld\n",remains.bits, remains_bytes);
+    }while(remains.bits > 0);
     fclose(fp);
     file_nb++;
 }
@@ -97,52 +95,49 @@ void write_pbm(const char* name, dim_t* dim, double bpixels_ratio){
   * SIDE EFFECTS : randomize the first n bytes of the buffer 
   *  */
 
-void random_make_sum(char buff[BUFF_LEN], int n){
-    long long i, tmp_v, tmp_i;
+void random_make_buffer(char buff[BUFF_LEN], int n){
+    assert(BUFF_LEN >= n);
+    assert(remains.bits != 0);
+    long long tmp_v = 0; 
+    int i , tmp_i = 0;
     long long sum = 0;
-    for(i = 0; i < n; i++){
+    for(i = 0; i < n; i++){ /** randomly init the first n bytes of the buffer */
         buff[i] = rand()%256;
-        sum += total_bit(buff[i]);
+        sum += total_bits(buff[i]);  /** calculate the number of '1' the first n bytes of the buffer containing */
     }
     if (sum > 8*n*remains.local_ratio ){
-        do{
-            tmp_i = (rand()*rand()*rand())%n;
-            tmp_v = total_bit(buff[tmp_i]);
-            if (tmp_v == 0) continue;
+        do{ 
+            /** randomly choose a non-null byte and decrease its number of '1' by 1*/
+            tmp_i = rand()%n;
+            tmp_v = total_bits(buff[tmp_i]);
+            if (tmp_v == 0) continue;  /** is a null byte*/
             buff[tmp_i] = random_make_byte(tmp_v - 1);
             sum-=1;
-        }while(sum > 8*n*remains.local_ratio && sum - 1 > 8*n*remains.local_ratio);
+        }while(sum > (int)8*n*remains.local_ratio);
     }
     else {
         do{
             tmp_i = rand()%n;
-            tmp_v = total_bit(buff[tmp_i]);
+            tmp_v = total_bits(buff[tmp_i]);
             if (tmp_v == 8) continue;
             buff[tmp_i] = random_make_byte(tmp_v + 1);
             sum+=1;
-        }while(sum < 8*n*remains.local_ratio && sum + 1 < 8*n*remains.local_ratio);
+        }while(sum < (int)8*n*remains.local_ratio);
     }
-    while(remains.bpixels== 0 && sum == 1 ) {
-            tmp_i = (rand()*rand()*rand())%n;
-            tmp_v = total_bit(buff[tmp_i]);
-            if (tmp_v == 0) continue;
-            buff[tmp_i] = random_make_byte(tmp_v - 1);
-            sum-=1;
-    };
     remains.bpixels -= sum;
-
 }
 
 /** 
-  * INPUT : number of bit (i.e '1') we want to the byte have
-  * OUTPUT : a char (byte) constituted by nb_bit '1' and n(char)-nb_bit '0'
+  * INPUT : number of '1' bit we want to the byte have
+  * OUTPUT : a char (byte) constituted by nb_bit '1' and sizeof(char)-nb_bit '0'
   *
   *  */
 
-char random_make_byte(int nb_bit){ //TODO : error tst of nb_bit value
+char random_make_byte(int nb_bit){ 
     char bit[8] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80};
     int i;
     char arr[8]={0}, byte = 0;
+    if (nb_bit >= 8) return 0x8F;  /** return 1111 1111 */
     while(sum_first(arr, 8)!=nb_bit){
         for (i=0;i<8;i++) arr[i] = rand()%2;
     }
@@ -156,10 +151,11 @@ char random_make_byte(int nb_bit){ //TODO : error tst of nb_bit value
   * 
   *  */
 
-int sum_first(char arr[], int n){
-    int i, n = 0;
+long long sum_first(char arr[], int n){
+    int i = 0;
+    long long sum = 0;
     for (i=0;i<n;i++) sum += arr[i];
-    return n;
+    return sum;
 }
 
 /** 
@@ -185,9 +181,9 @@ void print_byte(char x){
   *  */
 
 void init_remains(dim_t dim, double bpixels_ratio){
-    remains.bpixels = dim.width * dim.height * bpixels_ratio;
-    remains.remains_bits = dim.width*dim.height;
-    remains.local_ratio = bpixels_ratio;
+    remains.bpixels = dim.width * dim.height * bpixels_ratio; /** init remains black pixels*/
+    remains.bits = dim.width*dim.height; /** init remains bits */
+    remains.local_ratio = bpixels_ratio;  /** init the local black pixels ratio */
 }
 
 /** 
@@ -196,7 +192,7 @@ void init_remains(dim_t dim, double bpixels_ratio){
   *
   *  */
 
-int  total_bit(char x){
+int total_bits(char x){
     int i,k=0x80, sum = 0;
     for (i=0;i<8;i++){
         sum += (x & k)/k;
