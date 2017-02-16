@@ -7,7 +7,51 @@
 #include <math.h>
 //#define NDEBUG
 #include <assert.h>
-#define BUFF_LEN 300 //SEGFAULT for -O3
+#include <argp.h>
+#define BUFF_LEN 300 
+
+const char *argp_program_version = "PBMgenerator 1.0";
+
+struct arguments {
+  char *args[2];            /* arg1=width and arg2=height */
+  int verbose;              /* The -v flag */
+  char *outfile;            /* Argument for -o */
+  double bp_ratio;            /* Arguments for black pixels ratio*/
+};
+
+static struct argp_option options[] = {
+  {"verbose", 'v', 0, 0, "Produce verbose output"},
+  {"bpratio", 'r', "bp_ratio", 0, "The black pixels ratio that the image created will have"},
+  {"output",  'o', "OUTFILE", 0,"Output to the file outfile "},
+  {0}
+};
+
+static error_t parse_opt (int key, char *arg, struct argp_state *state) {
+  struct arguments *arguments = state->input;
+    
+	
+  switch (key) {
+    case 'v': arguments->verbose = 1; break;
+    case 'r': arguments->bp_ratio = strtod(arg,NULL); break;
+    case 'o': arguments->outfile = arg; break;
+    case ARGP_KEY_ARG:
+      if (state->arg_num >= 2) argp_usage(state);
+	  arguments->args[state->arg_num] = arg;
+      break;
+    case ARGP_KEY_END:
+      if (state->arg_num < 2) argp_usage (state);
+      break;
+    default: return ARGP_ERR_UNKNOWN;
+  }
+  return 0;
+}
+
+static char args_doc[] = "width height";
+
+static char doc[] = "PBMgenerator -- A program able to generate pbm image randomly with given"
+" dimensions and black pixels ratio.";
+
+static struct argp argp = {options, parse_opt, args_doc, doc};
 
 typedef struct{
     long width;  /** width in pixels (bits) */
@@ -22,24 +66,50 @@ typedef struct{
 
 remains_t remains;
 
+void init_args(struct arguments *args);
 void write_pbm(const char* name, dim_t* dim, double bpixels_ratio);
 void init_remains(dim_t dim, double bpixels_ratio);
 char random_make_byte(int nb_bit);
 long long sum_first(char arr[], int n);
-void print_byte(char x);
 void random_make_buffer(char buff[BUFF_LEN], int n);
 int  total_bits(char x);
 
-int main(){
+int main(int argc, char **argv){
+	struct arguments arguments;
+	init_args(&arguments);
+	argp_parse (&argp, argc, argv, 0, 0, &arguments);
+
     srand(time(NULL));
-    dim_t dim;
-    int i;
-    dim.width = 80;
-    dim.height = 50;
-    printf("start !\n");
-    write_pbm("tst", &dim, 0.01 );
-    return 0;
+    dim_t dim = {atol(arguments.args[0]), atol(arguments.args[1])};
+
+	if (!dim.width || !dim.height) fprintf(stderr,"Error : dimensions not correct\n");
+
+	double bp_ratio;
+
+	printf("%lf\n",arguments.bp_ratio);
+
+	if (arguments.bp_ratio) bp_ratio = arguments.bp_ratio;
+	else bp_ratio = 0.5;
+	
+	if (arguments.outfile) write_pbm(arguments.outfile, &dim, bp_ratio);
+	else write_pbm("pbm", &dim, bp_ratio);
+    
+	return 0;
 }
+
+/** 
+  * INPUT : the arguments structure
+  * OUTPUT : NULL
+  * SIDE EFFECTS : initialize arguments by each default value 
+  *  */
+
+void init_args(struct arguments *args){
+	args->outfile = NULL;
+	args->verbose = 0;
+	args->bp_ratio = 0.0;
+}
+
+
 
 /** 
   * INPUT : the file name, dimension struct and the black pixel ratio
@@ -66,12 +136,11 @@ void write_pbm(const char* name, dim_t* dim, double bpixels_ratio){
     }
    
     /* write header*/
-    sprintf(buff, "P4\n%ld %ld\n", dim->width, dim->height);
+    sprintf(buff, "P4\n%ld %ld\n", dim->width, dim->height); 
     fwrite(buff, sizeof(char),strlen(buff), fp);
-printf("init:remains.bits = %lld, remains_bytes = %lld\n",remains.bits, remains_bytes);   
     do{
-printf("before:remains.bits = %lld, remains_bytes = %lld\n",remains.bits, remains_bytes);
-        remains_bytes = (remains.bits <= 0) ? 0 : ((remains.bits % 8 == 0) ? remains.bits/8 : remains.bits/8 + 1);
+        /** Calculate exactly the right nb of bytes */
+        remains_bytes = (remains.bits <= 0) ? 0 : ((remains.bits % 8 == 0) ? remains.bits/8 : remains.bits/8 + 1); 
         if (remains_bytes == 0) break;
         write_bytes = (remains_bytes > BUFF_LEN) ? BUFF_LEN : remains_bytes;
         random_make_buffer(buff, write_bytes);
@@ -80,10 +149,9 @@ printf("before:remains.bits = %lld, remains_bytes = %lld\n",remains.bits, remain
 
         tmp_local_ratio = remains.local_ratio;
         if (remains.bpixels == 0) remains.local_ratio = 0;
-        remains.local_ratio = remains.bpixels / (remains.bits + 0.0000000000000000001);
-        if (remains.local_ratio < tmp_local_ratio) remains.local_ratio *= (0.01*(rand()%5)); //TODO
-printf("after:remains.bits = %lld, remains_bytes = %lld\n",remains.bits, remains_bytes);
-    }while(remains.bits > 0);
+        remains.local_ratio = remains.bpixels / (remains.bits + 0.0000000000000000001); /** prevent division by 0 */
+        if (remains.local_ratio < tmp_local_ratio) remains.local_ratio *= (0.01*(rand()%5)); //TODO modify the local ratio algo 
+    }while(remains_bytes > 0);
     fclose(fp);
     file_nb++;
 }
@@ -156,21 +224,6 @@ long long sum_first(char arr[], int n){
     long long sum = 0;
     for (i=0;i<n;i++) sum += arr[i];
     return sum;
-}
-
-/** 
-  * INPUT : a character
-  * OUTPUT : NULL
-  * SIDE EFFECTS : print a char as its byte form
-  *  */
-
-void print_byte(char x){
-    int i,k=0x80;
-    for (i=0;i<8;i++){
-        printf("%d",(x & k)/k);
-        k = k >> 1;
-    }
-    printf(" ");
 }
 
 
