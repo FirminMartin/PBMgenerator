@@ -9,7 +9,7 @@
 #include <argp.h>
 #define BUFF_LEN 300 
 
-const char *argp_program_version = "PBMgenerator 1.0";
+const char *argp_program_version = "pbm-generator 1.0";
 
 struct arguments {
   char *args[2];            /* arg[1]=width and arg[2]=height */
@@ -84,19 +84,21 @@ int  total_bits(char x);
 #define CYN   "\x1B[36m"
 #define WHT   "\x1B[37m"
 #define RESET "\x1B[0m"
+#define BOLD_ON "\x1b[1m"
+#define BOLD_OFF "\x1b[22m"
 
 int main(int argc, char **argv){
 	struct arguments arguments;
 	double bp_ratio;
 	int i;
-    clock_t start_clock, end_clock;
+    clock_t min, sec, ms;
 
     srand(time(NULL));
 	init_args(&arguments);
 	
     argp_parse (&argp, argc, argv, 0, 0, &arguments);
     
-    dim_t dim = {atol(arguments.args[0]), atol(arguments.args[1])};
+	dim_t dim = {atol(arguments.args[0]), atol(arguments.args[1])};
 	if (!dim.width || !dim.height) {
 		fprintf(stderr, RED "Error : dimensions incorrect\n" RESET);
 		exit(-2);
@@ -108,20 +110,24 @@ int main(int argc, char **argv){
 		exit(-3);
 	}
 
-    if (arguments.number > 0){
-        for(i=0;i<arguments.number;i++)  {
-            if (arguments.verbose) fprintf(stdout,WHT "%3d ... " RESET, i+1);
-            write_pbm(arguments.outfile, dim, bp_ratio);
-            if(arguments.verbose) {
-                if (clock()/CLOCKS_PER_SEC == 0) fprintf(stdout, BLU "done " YEL "%12ld"  BLU " ms\n" RESET, (clock()*1000)/CLOCKS_PER_SEC);
-                else fprintf(stdout, BLU "done " YEL "%5ld" BLU " s" YEL "%5ld" BLU " ms\n", clock()/CLOCKS_PER_SEC, (clock()*1000)/CLOCKS_PER_SEC%1000);
-            }
-        }
-    } else {
-        fprintf(stderr, RED "Error : requested number incorrect\n" RESET);
-        exit(-4);
-    }
-    
+	if (arguments.number > 0){
+		for(i=0;i<arguments.number;i++)  {
+			if (arguments.verbose) fprintf(stdout, BOLD_ON WHT "%4d" BOLD_OFF " ... " RESET, i+1);
+			write_pbm(arguments.outfile, dim, bp_ratio);
+			if(arguments.verbose) {
+				ms = (clock()*1000)/CLOCKS_PER_SEC;
+				sec = ms/1000;
+				min = sec/60;
+				if (min == 0 && sec == 0) fprintf(stdout, BLU "done " YEL "%16ld"  BLU " ms\n" RESET, ms);
+				else if (min == 0) fprintf(stdout, BLU "done " YEL "%5ld" BLU " s" YEL "%5ld" BLU " ms\n" RESET, sec, ms%1000);
+				else fprintf(stdout, BLU "done " YEL "%3ld" BLU " m" YEL "%5ld" BLU " s" YEL "%5ld" BLU " ms\n" RESET, min, sec%60, ms%1000);
+			}
+		}
+	} else {
+		fprintf(stderr, RED "Error : requested number incorrect\n" RESET);
+		exit(-4);
+	}
+
 	return 0;
 }
 
@@ -141,9 +147,9 @@ void init_args(struct arguments *args){
 
 
 /** 
-  * INPUT : the file name, dimension struct and the black pixel ratio
-  * OUPUT : NULL
-  * SIDE EFFECTS : create a .pbm image with a giving name, dimensions and black pixel ration.
+  * input : the file name, dimension struct and the black pixel ratio
+  * ouput : null
+  * side effects : create a .pbm image with a giving name, dimensions and black pixel ration.
   *  */
 
 void write_pbm(const char* name, dim_t dim, double bpixels_ratio){
@@ -171,18 +177,18 @@ void write_pbm(const char* name, dim_t dim, double bpixels_ratio){
     sprintf(buff, "P4\n%ld %ld\n", dim.width, dim.height); 
     fwrite(buff, sizeof(char),strlen(buff), fp);
     do{
-        /** Calculate exactly the right nb of bytes */
-        remains_bytes = (remains.bits <= 0) ? 0 : ((remains.bits % 8 == 0) ? remains.bits/8 : remains.bits/8 + 1); 
-        if (remains_bytes == 0) break;
-        write_bytes = (remains_bytes > BUFF_LEN) ? BUFF_LEN : remains_bytes;
-        random_make_buffer(buff, write_bytes);
-        fwrite(buff, sizeof(char), write_bytes, fp);
-        remains.bits -= 8*write_bytes;
-
-        tmp_local_ratio = remains.local_ratio;
-        if (remains.bpixels == 0) remains.local_ratio = 0;
-        remains.local_ratio = remains.bpixels / (remains.bits + 0.0000000000000000001); /** prevent division by 0 */
-        if (remains.local_ratio < tmp_local_ratio) remains.local_ratio *= (0.01*(rand()%5)); //TODO modify the local ratio algo 
+		/** Calculate exactly the right nb of bytes */
+		remains_bytes = (remains.bits <= 0) ? 0 : ((remains.bits % 8 == 0) ? remains.bits/8 : remains.bits/8 + 1); 
+		if (remains_bytes == 0) break;
+		write_bytes = (remains_bytes > BUFF_LEN) ? BUFF_LEN : remains_bytes;
+		random_make_buffer(buff, write_bytes);
+		fwrite(buff, sizeof(char), write_bytes, fp);
+		remains.bits -= 8*write_bytes;
+		
+		tmp_local_ratio = remains.local_ratio;
+		if (remains.bpixels == 0) remains.local_ratio = 0;
+		remains.local_ratio = remains.bpixels / (remains.bits + 0.0000000000000000001); /** prevent division by 0 */
+		if (remains.local_ratio < tmp_local_ratio) remains.local_ratio *= (0.01*(rand()%5)); //TODO modify the local ratio algo 
     }while(remains_bytes > 0);
     fclose(fp);
     file_nb++;
