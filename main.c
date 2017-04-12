@@ -166,7 +166,7 @@ void write_pbm(const char* name, dim_t dim, double bpixels_ratio){
         if (file_nb == 0) sprintf(file_name, "%s.pbm", name);
         else sprintf(file_name, "%s_%d.pbm", name, file_nb);
     }
-	else sprintf(file_name, "%ldx%ld-%.2f_%d.pbm",dim.width, dim.height, bpixels_ratio, file_nb);
+	else sprintf(file_name, "%ldx%ld-%.2f%%_%d.pbm",dim.width, dim.height,100.0*bpixels_ratio, file_nb);
 
     fp = fopen(file_name,"wb");
     if(!fp){
