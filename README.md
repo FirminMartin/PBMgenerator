@@ -18,3 +18,8 @@
 |-r |--bpratio      |specifies the black pixels ratio
 |-V |--version      |shows the current version
 |-? |--help, --usage|shows help
+
+
+## Todo
+
+- add tsp2pbm functionality
