@@ -1,13 +1,8 @@
-pbm-generator : main.c
-	 gcc main.c -o pbm-generator 	
+all: pbmgen
 
-.PHONY :  clean cleanpbm cleanall
+pbmgen: main.o method.o pbm.o 
+	gcc $^ -o $@
 
-clean :
-	rm pbm-generator *.o 
+clean:
+	rm -f *.o pbmgen
 
-cleanpbm :
-	rm *.pbm
-
-cleanall :
-	rm pbm-generator *.o *.pbm
